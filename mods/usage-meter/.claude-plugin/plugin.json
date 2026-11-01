@@ -1,0 +1,36 @@
+{
+  "name": "usage-meter",
+  "version": "0.1.0",
+  "description": "在提示框上方顯示模型、context、5h／7d 額度、快取與花費",
+  "author": { "name": "TroyWhiteTW", "url": "https://github.com/TroyWhiteTW" },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "layout": {
+      "type": "string",
+      "title": "版面",
+      "description": "A＝圓角框（占 3 列）；B＝底色塊（占 1 列）",
+      "default": "A",
+      "options": ["A", "B"]
+    },
+    "barStyle": {
+      "type": "string",
+      "title": "進度條樣式",
+      "description": "auto＝A 用細線、B 用分格；line＝細線；segment＝分格",
+      "default": "auto",
+      "options": ["auto", "line", "segment"]
+    },
+    "showCache": {
+      "type": "boolean",
+      "title": "顯示快取",
+      "description": "顯示快取命中率與還剩幾分鐘失效",
+      "default": true
+    },
+    "showCost": {
+      "type": "boolean",
+      "title": "顯示花費",
+      "description": "顯示 session 累計花費與最新一則的花費",
+      "default": true
+    }
+  }
+}

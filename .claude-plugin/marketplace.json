@@ -1,0 +1,8 @@
+{
+  "name": "troywhitetw-mods",
+  "description": "TroyWhiteTW 的 Claude Code mods",
+  "owner": { "name": "TroyWhiteTW" },
+  "plugins": [
+    { "name": "usage-meter", "source": "./mods/usage-meter" }
+  ]
+}
