@@ -95,12 +95,12 @@ function seed(on: On, patch: Partial<Snapshot> = {}, shape = 'snapshot-2') {
   )
 }
 
-function engine(on: On, usage: () => SessionUsage, theme = 'dark') {
+function engine(on: On, usage: () => SessionUsage, theme: () => string = () => 'dark') {
   on('session.usage', () => ({ value: usage() }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('config.list', () => ({
     value: [
-      { key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false },
+      { key: 'theme', label: 'Theme', kind: 'choice', value: theme(), provider: { plugin: 'engine', tier: 'core' }, isLocked: false },
     ],
   }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -255,8 +255,74 @@ for (const [name, deltas, text] of SPARKS) {
   })
 }
 
+const THEMES: readonly (readonly [string, string])[] = [
+  ['light', LIGHT_FG],
+  ['light-daltonized', LIGHT_FG],
+  ['light-ansi', LIGHT_FG],
+  ['dark', FG],
+  ['dark-daltonized', FG],
+  ['dark-ansi', FG],
+  ['auto', FG],
+]
+
+for (const [theme, color] of THEMES) {
+  test(`the ${theme} theme picks its palette`, async ($, on) => {
+    engine(on, () => USAGE, () => theme)
+    await $.session.start(START)
+    const ui = await $.ui.mount(BAND)
+
+    expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(color)
+    await ui.unmount()
+  })
+}
+
+const SET_LIGHT = {
+  key: 'theme',
+  value: 'light',
+  previous: 'dark',
+  provider: { plugin: 'engine', tier: 'core' },
+  origin: { kind: 'composer' },
+} as const
+
+test('a theme set through the menu recolors the band at once', async ($, on) => {
+  // 真實引擎剛寫入時，config.list 還是舊值，所以這裡的清單不跟著變
+  engine(on, () => USAGE, () => 'dark')
+  on('config.set', (_, e) => ({ value: e.value }))
+  await $.session.start(START)
+  const ui = await $.ui.mount(BAND)
+
+  expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(FG)
+  await $.config.set(SET_LIGHT)
+  expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(LIGHT_FG)
+  await ui.unmount()
+})
+
+test('a refused theme keeps the palette', async ($, on) => {
+  engine(on, () => USAGE, () => 'dark')
+  on('config.set', () => ({ deny: 'the theme stays' }))
+  await $.session.start(START)
+  const ui = await $.ui.mount(BAND)
+
+  await $.config.set(SET_LIGHT)
+  expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(FG)
+  await ui.unmount()
+})
+
+test('a theme changed any other way is picked up by the timer', async ($, on) => {
+  let theme = 'dark'
+  const clock = engine(on, () => USAGE, () => theme)
+  await $.session.start(START)
+  const ui = await $.ui.mount(BAND)
+
+  theme = 'light'
+  expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(FG)
+  await clock.advance(31 * 1000)
+  expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(LIGHT_FG)
+  await ui.unmount()
+})
+
 test('session.start reads the usage, the model and the theme', async ($, on) => {
-  engine(on, () => USAGE, 'light')
+  engine(on, () => USAGE, () => 'light')
   await $.session.start(START)
   const ui = await $.ui.mount(BAND)
 
@@ -353,7 +419,7 @@ test('a snapshot an earlier version stored is declined', async ($, on) => {
 for (const source of ['clear', 'resume', 'fork'] as const) {
   test(`${source} starts the band over from the live figures`, async ($, on) => {
     let usage = USAGE
-    engine(on, () => usage, 'light')
+    engine(on, () => usage, () => 'light')
     await $.session.start(START)
     usage = { ...USAGE, context: { tokens: 53300, window: 1000000 }, cost: { usd: 1.12 } }
     await $.turn.complete(TURN)

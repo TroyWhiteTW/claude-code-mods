@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, PluginOptions, Register, SessionRateLimit, SessionUsage, TurnUsage } from 'claude-code'
+import type { ConfigRow, ConfigValue, EngineInterface, PluginOptions, Register, SessionRateLimit, SessionUsage, TurnUsage } from 'claude-code'
 
 import type { CacheTtl, Limit, Snapshot } from '../types'
 
@@ -396,16 +396,28 @@ function pills(s: Snapshot, settings: Settings, at: number): Pill[] {
   return list.filter((pill): pill is Pill => pill !== null)
 }
 
+function themeRow(rows: readonly ConfigRow[]): ConfigValue | undefined {
+  return rows.find(row => row.key === 'theme')?.value
+}
+
+function isLightTheme(theme: ConfigValue | undefined): boolean {
+  return typeof theme === 'string' && theme.includes('light')
+}
+
+async function syncTheme($: EngineInterface, theme: ConfigValue | undefined): Promise<void> {
+  const isLight = isLightTheme(theme)
+  await update($, snapshot, s => (s.isLight === isLight ? s : { ...s, isLight }))
+}
+
 async function load($: EngineInterface, base?: Snapshot): Promise<void> {
   const [usage, model, rows] = await Promise.all([$.session.usage(), $.session.model(), $.config.list()])
-  const theme = rows.find(row => row.key === 'theme')?.value
   await update($, snapshot, s => {
     const live = withUsage(base ?? s, usage)
 
     return {
       ...live,
       model,
-      isLight: typeof theme === 'string' && theme.includes('light'),
+      isLight: isLightTheme(themeRow(rows)),
       baseTokens: live.baseTokens ?? live.contextTokens,
       baseCost: live.baseCost ?? live.costUsd,
     }
@@ -419,9 +431,20 @@ export const register: Register = (on, options) => {
     await load($)
     $.clock.every(30 * 1000, () => {
       void $.clock.now().then(at => update($, tick, () => at))
+      void $.config.list().then(rows => syncTheme($, themeRow(rows)))
     })
 
     return next(e)
+  })
+
+  on('config.set', { key: 'theme' }, async ($, e, next) => {
+    const result = await next(e)
+    // 剛寫入時 $.config.list() 還是舊值，所以用 next(e) 回傳的值
+    if ('value' in result) {
+      await syncTheme($, result.value)
+    }
+
+    return result
   })
 
   on('classic.SessionStart', async ($, e, next) => {

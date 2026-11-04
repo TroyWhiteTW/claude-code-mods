@@ -65,4 +65,6 @@ claude plugin update usage-meter@troywhitetw-mods
 
 進度條的實線是已用量，虛線是已用量跟時間進度的差距：灰色代表還有餘裕，變成彩色代表用得比時間快。
 
+配色會跟著 Claude Code 的主題切換深淺，換主題後最多 30 秒更新。主題設成 `auto` 時，mod 無法得知實際深淺，一律用深色配色。
+
 ![顏色](assets/colors.svg)
