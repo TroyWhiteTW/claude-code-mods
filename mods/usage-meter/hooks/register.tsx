@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { PluginOptions, Register, SessionRateLimit, SessionUsage, TurnUsage } from 'claude-code'
+import type { EngineInterface, PluginOptions, Register, SessionRateLimit, SessionUsage, TurnUsage } from 'claude-code'
 
-import type { Limit, Snapshot } from '../types'
+import type { CacheTtl, Limit, Snapshot } from '../types'
 
 type Tone = 'ok' | 'amber' | 'red'
 type BarStyle = 'line' | 'segment'
@@ -27,8 +27,10 @@ const MINUTE = 60 * 1000
 const HOUR = 60 * MINUTE
 const FIVE_HOURS = 5 * HOUR
 const SEVEN_DAYS = 7 * 24 * HOUR
-const CACHE_TTL = HOUR
-const CACHE_WARN = 10 * MINUTE
+const CACHE_TTL: Record<CacheTtl, { life: number; warn: number }> = {
+  '5m': { life: 5 * MINUTE, warn: MINUTE },
+  '1h': { life: HOUR, warn: 10 * MINUTE },
+}
 const CACHE_HIT_LOW = 0.9
 const CONTEXT_AMBER = 60
 const CONTEXT_RED = 85
@@ -94,11 +96,12 @@ const EMPTY: Snapshot = {
   sevenDay: null,
   cacheHit: null,
   lastResponseAt: null,
+  cacheTtl: null,
   costUsd: null,
   lastCostUsd: null,
 }
 
-const snapshot = atom({ plugin: 'usage-meter', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-1' })
+const snapshot = atom({ plugin: 'usage-meter', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-2' })
 const tick = atom({ plugin: 'usage-meter', key: 'tick' } as const, 0)
 
 function readSettings(options: PluginOptions): Settings {
@@ -329,12 +332,22 @@ function limitPill(
   return { colors, segs: [...segs, ...sep(p), { text: '↻', color: colors.icon }, { text: ' ' }, { text: reset, color: p.dim }] }
 }
 
+function cacheTtlOf(s: Snapshot): CacheTtl {
+  const limits = [s.fiveHour, s.sevenDay].filter((limit): limit is Limit => limit !== null)
+  if (limits.some(limit => limit.percentUsed >= 100)) {
+    return '5m'
+  }
+
+  return s.cacheTtl ?? (limits.length > 0 ? '1h' : '5m')
+}
+
 function cachePill(s: Snapshot, p: Palette, at: number): Pill | null {
   if (s.lastResponseAt === null) {
     return null
   }
-  const left = s.lastResponseAt + CACHE_TTL - at
-  const tone: Tone = left <= 0 ? 'red' : left < CACHE_WARN ? 'amber' : 'ok'
+  const { life, warn } = CACHE_TTL[cacheTtlOf(s)]
+  const left = s.lastResponseAt + life - at
+  const tone: Tone = left <= 0 ? 'red' : left < warn ? 'amber' : 'ok'
   const colors = pillColors(p, 'cache', tone)
   const segs: Seg[] = [{ text: '↯', color: colors.icon }, { text: ' ' }, { text: 'cache', color: p.fg }]
   if (s.cacheHit !== null) {
@@ -383,26 +396,44 @@ function pills(s: Snapshot, settings: Settings, at: number): Pill[] {
   return list.filter((pill): pill is Pill => pill !== null)
 }
 
+async function load($: EngineInterface, base?: Snapshot): Promise<void> {
+  const [usage, model, rows] = await Promise.all([$.session.usage(), $.session.model(), $.config.list()])
+  const theme = rows.find(row => row.key === 'theme')?.value
+  await update($, snapshot, s => {
+    const live = withUsage(base ?? s, usage)
+
+    return {
+      ...live,
+      model,
+      isLight: typeof theme === 'string' && theme.includes('light'),
+      baseTokens: live.baseTokens ?? live.contextTokens,
+      baseCost: live.baseCost ?? live.costUsd,
+    }
+  })
+}
+
 export const register: Register = (on, options) => {
   const settings = readSettings(options)
 
   on('session.start', async ($, e, next) => {
-    const [usage, model, rows] = await Promise.all([$.session.usage(), $.session.model(), $.config.list()])
-    const theme = rows.find(row => row.key === 'theme')?.value
-    await update($, snapshot, s => {
-      const live = withUsage(s, usage)
-
-      return {
-        ...live,
-        model,
-        isLight: typeof theme === 'string' && theme.includes('light'),
-        baseTokens: live.baseTokens ?? live.contextTokens,
-        baseCost: live.baseCost ?? live.costUsd,
-      }
-    })
+    await load($)
     $.clock.every(30 * 1000, () => {
       void $.clock.now().then(at => update($, tick, () => at))
     })
+
+    return next(e)
+  })
+
+  on('classic.SessionStart', async ($, e, next) => {
+    if (e.source === 'clear' || e.source === 'resume' || e.source === 'fork') {
+      await load($, EMPTY)
+    }
+
+    return next(e)
+  })
+
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    await update($, snapshot, s => ({ ...s, model: e.to_model, cacheTtl: e.cache_ttl }))
 
     return next(e)
   })

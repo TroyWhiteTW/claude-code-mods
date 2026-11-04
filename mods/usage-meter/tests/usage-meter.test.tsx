@@ -26,6 +26,7 @@ const SNAPSHOT: Snapshot = {
   sevenDay: { percentUsed: 35, resetsAt: AT + 86 * HOUR },
   cacheHit: 0.98,
   lastResponseAt: AT - 6 * MINUTE,
+  cacheTtl: null,
   costUsd: 1.84,
   lastCostUsd: 0.12,
 }
@@ -73,11 +74,23 @@ const TURN = {
 
 const STEP = { turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 } as const
 
-function seed(on: On, patch: Partial<Snapshot> = {}) {
+const SWITCH = {
+  from_model: 'claude-opus-5-5',
+  to_model: 'claude-sonnet-5-5',
+  requested_model: 'sonnet',
+  source: 'command',
+  context_tokens: 0,
+  prompt_cache_warm: true,
+  cache_ttl: '5m',
+  estimated_cache_write_usd: 0,
+  pricing: 'catalog',
+} as const
+
+function seed(on: On, patch: Partial<Snapshot> = {}, shape = 'snapshot-2') {
   on('clock.now', () => ({ value: AT }))
   on('state.get', (_, e) =>
     e.key === 'snapshot'
-      ? { value: { value: { shape: 'snapshot-1', value: { ...SNAPSHOT, ...patch } }, version: 1 } }
+      ? { value: { value: { shape, value: { ...SNAPSHOT, ...patch } }, version: 1 } }
       : { value: { value: AT, version: 1 } },
   )
 }
@@ -92,6 +105,8 @@ function engine(on: On, usage: () => SessionUsage, theme = 'dark') {
   }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('classic.SessionStart', () => ({}))
+  on('classic.PostModelSwitch', () => ({}))
   on('turn.complete', (_, e) => ({ text: e.answer }))
   on('turn.step', async function* (_, e) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
@@ -159,6 +174,8 @@ const TONES: readonly (readonly [string, Partial<Snapshot>, RegExp, string])[] =
   ['a low cache hit rate turns amber', { cacheHit: 0.64 }, /^64%$/, AMBER],
   ['a cache about to lapse turns amber', { lastResponseAt: AT - 55 * MINUTE }, /^5m$/, AMBER],
   ['a lapsed cache turns red', { lastResponseAt: AT - 2 * HOUR }, /^expired$/, RED],
+  ['a 5 minute cache about to lapse turns amber', { fiveHour: null, sevenDay: null, lastResponseAt: AT - 4.5 * MINUTE }, /^1m$/, AMBER],
+  ['a lapsed 5 minute cache turns red', { fiveHour: null, sevenDay: null, lastResponseAt: AT - 6 * MINUTE }, /^expired$/, RED],
 ]
 
 for (const [name, patch, text, color] of TONES) {
@@ -298,6 +315,86 @@ test('turn.step records the effort of the main thread alone', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /^max$/ })).toBeUndefined()
   await $.turn.step({ ...STEP, effort: 'high' }).next()
   expect(await ui.find({ type: 'Text', text: /^high$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+const TTLS: readonly (readonly [string, Partial<Snapshot>, RegExp])[] = [
+  ['off a subscription the cache lasts 5 minutes', { fiveHour: null, sevenDay: null, lastResponseAt: AT - MINUTE }, /^4m$/],
+  ['an exhausted window drops the cache to 5 minutes', { fiveHour: { percentUsed: 100, resetsAt: AT + HOUR }, lastResponseAt: AT - MINUTE }, /^4m$/],
+  ['an exhausted window beats a reported 1 hour', { cacheTtl: '1h', sevenDay: { percentUsed: 100, resetsAt: AT + HOUR }, lastResponseAt: AT - MINUTE }, /^4m$/],
+  ['a reported 1 hour beats the guess off a subscription', { cacheTtl: '1h', fiveHour: null, sevenDay: null, lastResponseAt: AT - 6 * MINUTE }, /^54m$/],
+  ['a reported 5 minutes beats the guess on a subscription', { cacheTtl: '5m', lastResponseAt: AT - MINUTE }, /^4m$/],
+]
+
+for (const [name, patch, text] of TTLS) {
+  test(name, async ($, on) => {
+    seed(on, patch)
+    const ui = await $.ui.mount(BAND)
+
+    expect(await ui.find({ type: 'Text', text })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+test('a snapshot an earlier version stored is declined', async ($, on) => {
+  seed(on, {}, 'snapshot-1')
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+
+    return <Text>engine</Text>
+  })
+  const ui = await $.ui.mount(BAND)
+
+  expect(await ui.find({ type: 'Text', text: /engine/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Opus/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+for (const source of ['clear', 'resume', 'fork'] as const) {
+  test(`${source} starts the band over from the live figures`, async ($, on) => {
+    let usage = USAGE
+    engine(on, () => usage, 'light')
+    await $.session.start(START)
+    usage = { ...USAGE, context: { tokens: 53300, window: 1000000 }, cost: { usd: 1.12 } }
+    await $.turn.complete(TURN)
+    await $.classic.PostModelSwitch(SWITCH)
+    await $.classic.SessionStart({ source })
+    const ui = await $.ui.mount(BAND)
+
+    expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(LIGHT_FG)
+    for (const text of [/5\.3%/, /^22%$/, /≈ \$1\.12/]) {
+      expect(await ui.find({ type: 'Text', text })).toBeDefined()
+    }
+    for (const text of [/▲/, /\+\$/, /cache/]) {
+      expect(await ui.find({ type: 'Text', text })).toBeUndefined()
+    }
+    await ui.unmount()
+  })
+}
+
+test('a compaction keeps the band', async ($, on) => {
+  let usage = USAGE
+  engine(on, () => usage)
+  await $.session.start(START)
+  usage = { ...USAGE, context: { tokens: 53300, window: 1000000 } }
+  await $.turn.complete(TURN)
+  await $.classic.SessionStart({ source: 'compact' })
+  const ui = await $.ui.mount(BAND)
+
+  expect(await ui.find({ type: 'Text', text: /▲ \+5\.3k/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a model switch updates the model and the cache at once', async ($, on) => {
+  engine(on, () => USAGE)
+  await $.session.start(START)
+  await $.turn.complete(TURN)
+  await $.classic.PostModelSwitch(SWITCH)
+  const ui = await $.ui.mount(BAND)
+
+  expect(await ui.find({ type: 'Text', text: /^Sonnet 5\.5$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Opus/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^5m$/ })).toBeDefined()
   await ui.unmount()
 })
 

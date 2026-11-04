@@ -1,5 +1,7 @@
 export type Limit = { percentUsed: number; resetsAt: number | null }
 
+export type CacheTtl = '5m' | '1h'
+
 export type Snapshot = {
   model: string | null
   effort: string | null
@@ -13,6 +15,7 @@ export type Snapshot = {
   sevenDay: Limit | null
   cacheHit: number | null
   lastResponseAt: number | null
+  cacheTtl: CacheTtl | null
   costUsd: number | null
   lastCostUsd: number | null
 }
