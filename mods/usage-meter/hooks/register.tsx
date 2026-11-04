@@ -33,6 +33,7 @@ const CACHE_HIT_LOW = 0.9
 const CONTEXT_AMBER = 60
 const CONTEXT_RED = 85
 const LIMIT_RED = 90
+const PACE_WARN_AFTER = 0.1
 const SPARK_SIZE = 5
 const BAR_CELLS = 10
 
@@ -140,13 +141,13 @@ function hitRate(usage: TurnUsage | undefined): number | null {
 
 export function modelLabel(raw: string): string {
   const id = raw.replace(/\[[^\]]*\]$/, '').trim()
-  const match = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-|$)/i.exec(id)
-  if (match === null) {
+  const [, name, major, minor] = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-|$)/i.exec(id) ?? []
+  if (name === undefined) {
     return id
   }
-  const family = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase()
+  const family = name.charAt(0).toUpperCase() + name.slice(1).toLowerCase()
 
-  return match[3] === undefined ? `${family} ${match[2]}` : `${family} ${match[2]}.${match[3]}`
+  return minor === undefined ? `${family} ${major}` : `${family} ${major}.${minor}`
 }
 
 export function tokenLabel(n: number): string {
@@ -265,15 +266,15 @@ function contextPill(s: Snapshot, p: Palette): Pill | null {
   if (tone === 'red') {
     return { colors, segs: [...segs, ...sep(p), { text: 'compact soon', color: p.red }] }
   }
-  if (s.deltas.length === 0) {
+  const last = s.deltas.at(-1)
+  if (last === undefined) {
     return { colors, segs }
   }
 
-  const levels = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
-  const max = Math.max(...s.deltas.map(Math.abs))
-  const last = s.deltas[s.deltas.length - 1]
+  const levels = '▁▂▃▄▅▆▇█'
+  const max = Math.max(...s.deltas)
   const spark: Seg[] = s.deltas.map((delta, i) => ({
-    text: levels[Math.max(0, Math.round((Math.abs(delta) / max) * 8) - 1)],
+    text: levels.charAt(delta > 0 ? Math.max(0, Math.round((delta / max) * 8) - 1) : 0),
     color: i === s.deltas.length - 1 ? p.amber : p.spark,
   }))
   const deltaText = last >= 0 ? `▲ +${tokenLabel(last)}` : `▼ ${tokenLabel(last)}`
@@ -294,10 +295,13 @@ function limitPill(
   if (limit === null) {
     return null
   }
-  const used = limit.percentUsed / 100
   const left = limit.resetsAt === null ? null : limit.resetsAt - at
-  const pace = left === null ? used : Math.max(0, Math.min(1, 1 - left / windowMs))
-  const tone: Tone = limit.percentUsed >= LIMIT_RED ? 'red' : used > pace ? 'amber' : 'ok'
+  const hasReset = left !== null && left <= 0
+  const percent = hasReset ? 0 : limit.percentUsed
+  const used = percent / 100
+  const pace = left === null || hasReset ? used : Math.max(0, Math.min(1, 1 - left / windowMs))
+  const isAhead = used > pace && pace >= PACE_WARN_AFTER
+  const tone: Tone = percent >= LIMIT_RED ? 'red' : isAhead ? 'amber' : 'ok'
   const colors = pillColors(p, hue, tone)
   const segs: Seg[] = [
     { text: icon, color: colors.icon },
@@ -306,22 +310,18 @@ function limitPill(
     { text: ' ' },
     ...bar(p, used, pace, style, toneColor(p, tone)),
     { text: ' ' },
-    { text: `${Math.round(limit.percentUsed)}%`, color: toneText(p, tone), bold: true },
+    { text: `${Math.round(percent)}%`, color: toneText(p, tone), bold: true },
   ]
-  if (left === null || limit.resetsAt === null) {
+  if (left === null || hasReset || limit.resetsAt === null) {
     return { colors, segs }
   }
 
-  const elapsedMs = pace * windowMs
-  if (windowMs === SEVEN_DAYS && elapsedMs > 0 && limit.percentUsed > 0 && limit.percentUsed < 100) {
-    const msToFull = ((100 - limit.percentUsed) / limit.percentUsed) * elapsedMs
-    if (msToFull < left) {
-      const out = new Date(at + msToFull)
-      const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][out.getDay()]
-      const warn = `⚠ out ${day} ${clockLabel(at + msToFull)}`
+  if (windowMs === SEVEN_DAYS && isAhead && percent < 100) {
+    const outAt = at + ((100 - percent) / percent) * pace * windowMs
+    const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(outAt).getDay()]
+    const warn = `⚠ out ${day} ${clockLabel(outAt)}`
 
-      return { colors, segs: [...segs, ...sep(p), { text: warn, color: toneColor(p, tone === 'ok' ? 'amber' : tone) }] }
-    }
+    return { colors, segs: [...segs, ...sep(p), { text: warn, color: toneColor(p, tone) }] }
   }
 
   const reset = windowMs === FIVE_HOURS ? `${hoursLabel(left)} → ${clockLabel(limit.resetsAt)}` : daysLabel(left)
