@@ -2,7 +2,25 @@
 
 在 Claude Code 提示框上方顯示一列用量資訊，為終端機（CLI）設計。
 
-![版面 A](assets/layout-a.svg)
+## 版面
+
+有兩種版面，輸入 `/config` 切換。
+
+**版面 A（預設）**：圓角框，每排占 3 列，進度條預設用細線。
+
+![版面 A](assets/layout-a-wide.svg)
+
+**版面 B**：底色塊，每排占 1 列，進度條預設用分格。
+
+![版面 B](assets/layout-b-wide.svg)
+
+上面是終端機夠寬的樣子。排成一排大約要 183 欄（版面 A）或 171 欄（版面 B），實際欄數依顯示內容而定。
+
+不夠寬時會自動換行，例如 105 欄寬：
+
+![版面 A，105 欄寬](assets/layout-a.svg)
+
+![版面 B，105 欄寬](assets/layout-b.svg)
 
 ## 顯示內容
 
@@ -17,8 +35,6 @@
   - 訂閱帳號以 1 小時倒數；不是訂閱帳號或額度已用完時，以 5 分鐘倒數
   - Claude Code 只有換模型時才回報快取時間，所以平常是估計值
 - session 累計花費與最新一則的花費
-
-終端機不夠寬時會自動換行；上圖是 105 欄寬的樣子，夠寬的話會排成一列。
 
 ## 安裝
 
@@ -52,10 +68,6 @@ claude plugin update usage-meter@troywhitetw-mods
 | 進度條樣式 | `auto`、`line` 細線、`segment` 分格 | `auto`（A 用細線、B 用分格） |
 | 顯示快取 | 開／關 | 開 |
 | 顯示花費 | 開／關 | 開 |
-
-版面 B：
-
-![版面 B](assets/layout-b.svg)
 
 ## 顏色
 

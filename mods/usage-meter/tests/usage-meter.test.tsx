@@ -88,11 +88,7 @@ const SWITCH = {
 
 function seed(on: On, patch: Partial<Snapshot> = {}, shape = 'snapshot-2') {
   on('clock.now', () => ({ value: AT }))
-  on('state.get', (_, e) =>
-    e.key === 'snapshot'
-      ? { value: { value: { shape, value: { ...SNAPSHOT, ...patch } }, version: 1 } }
-      : { value: { value: AT, version: 1 } },
-  )
+  on('state.get', () => ({ value: { value: { shape, value: { ...SNAPSHOT, ...patch } }, version: 1 } }))
 }
 
 function engine(on: On, usage: () => SessionUsage, theme: () => string = () => 'dark') {
@@ -134,7 +130,6 @@ test('layout A draws every pill with the defaults', async ($, on) => {
   for (const text of [/Opus 5\.5/, /xhigh/, /4\.8%/, /\(48k\/1M\)/, /\+5\.3k/, /22%/, /━━╍╍━━━━━━/, /35%/, /3d14h/, /98%/, /54m/, /≈ \$1\.84/, /\+\$0\.12/]) {
     expect(await ui.find({ type: 'Text', text })).toBeDefined()
   }
-  await ui.unmount()
 })
 
 test('cache and cost can be hidden', { options: { showCache: false, showCost: false } }, async ($, on) => {
@@ -144,7 +139,6 @@ test('cache and cost can be hidden', { options: { showCache: false, showCost: fa
   expect(await ui.find({ type: 'Text', text: /4\.8%/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /cache/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /\$1\.84/ })).toBeUndefined()
-  await ui.unmount()
 })
 
 test('a stored block bar style falls back to auto', { options: { layout: 'B', barStyle: 'block' } }, async ($, on) => {
@@ -153,7 +147,6 @@ test('a stored block bar style falls back to auto', { options: { layout: 'B', ba
 
   expect(await ui.find({ type: 'Text', text: /▰▰▱▱▱▱▱▱▱▱/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /╱/ })).toBeUndefined()
-  await ui.unmount()
 })
 
 test('layout B uses the segment bar by default', { options: { layout: 'B' } }, async ($, on) => {
@@ -162,8 +155,23 @@ test('layout B uses the segment bar by default', { options: { layout: 'B' } }, a
 
   expect(await ui.find({ type: 'Text', text: /▰▰▱▱▱▱▱▱▱▱/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /54m/ })).toBeDefined()
-  await ui.unmount()
 })
+
+const TRACKS: readonly (readonly [string, Record<string, string>, Partial<Snapshot>, RegExp, string])[] = [
+  ['layout A keeps its dim track', {}, {}, /^━{6}$/, '#353943'],
+  ['layout B lifts the empty cells off its solid pills', { layout: 'B' }, {}, /^▱{6}$/, '#5a5f6a'],
+  ['layout B lifts the empty cells in the light theme', { layout: 'B' }, { isLight: true }, /^▱{6}$/, '#a9aeb6'],
+  ['a line bar on layout B lifts its track too', { layout: 'B', barStyle: 'line' }, {}, /^━{6}$/, '#5a5f6a'],
+]
+
+for (const [name, options, patch, text, color] of TRACKS) {
+  test(name, { options }, async ($, on) => {
+    seed(on, patch)
+    const ui = await $.ui.mount(BAND)
+
+    expect((await ui.find({ type: 'Text', text }))?.props.color).toBe(color)
+  })
+}
 
 const TONES: readonly (readonly [string, Partial<Snapshot>, RegExp, string])[] = [
   ['a slow window stays calm', {}, /^22%$/, FG],
@@ -184,7 +192,6 @@ for (const [name, patch, text, color] of TONES) {
     const ui = await $.ui.mount(BAND)
 
     expect((await ui.find({ type: 'Text', text }))?.props.color).toBe(color)
-    await ui.unmount()
   })
 }
 
@@ -195,7 +202,6 @@ test('a window past its reset reads as empty', async ($, on) => {
   expect((await ui.find({ type: 'Text', text: /^0%$/ }))?.props.color).toBe(FG)
   expect(await ui.find({ type: 'Text', text: /95%/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /0h00/ })).toBeUndefined()
-  await ui.unmount()
 })
 
 test('the first 10% of a window does not warn', async ($, on) => {
@@ -205,7 +211,6 @@ test('the first 10% of a window does not warn', async ($, on) => {
   expect((await ui.find({ type: 'Text', text: /^20%$/ }))?.props.color).toBe(FG)
   expect(await ui.find({ type: 'Text', text: /6d9h/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /⚠/ })).toBeUndefined()
-  await ui.unmount()
 })
 
 test('past 10% a fast 7d window warns when it runs out', async ($, on) => {
@@ -218,7 +223,6 @@ test('past 10% a fast 7d window warns when it runs out', async ($, on) => {
   expect((await ui.find({ type: 'Text', text: /^⚠/ }))?.text).toBe(warn)
   expect((await ui.find({ type: 'Text', text: /^⚠/ }))?.props.color).toBe(AMBER)
   expect(await ui.find({ type: 'Text', text: /5d6h/ })).toBeUndefined()
-  await ui.unmount()
 })
 
 test('a fast 5h window keeps its reset time', async ($, on) => {
@@ -227,7 +231,6 @@ test('a fast 5h window keeps its reset time', async ($, on) => {
 
   expect(await ui.find({ type: 'Text', text: /3h00/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /⚠/ })).toBeUndefined()
-  await ui.unmount()
 })
 
 test('context past 85% asks for a compact in place of the spark', async ($, on) => {
@@ -236,7 +239,6 @@ test('context past 85% asks for a compact in place of the spark', async ($, on) 
 
   expect(await ui.find({ type: 'Text', text: /compact soon/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /▲/ })).toBeUndefined()
-  await ui.unmount()
 })
 
 const SPARKS: readonly (readonly [string, number[], RegExp])[] = [
@@ -251,7 +253,6 @@ for (const [name, deltas, text] of SPARKS) {
     const ui = await $.ui.mount(BAND)
 
     expect(await ui.find({ type: 'Text', text })).toBeDefined()
-    await ui.unmount()
   })
 }
 
@@ -272,7 +273,6 @@ for (const [theme, color] of THEMES) {
     const ui = await $.ui.mount(BAND)
 
     expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(color)
-    await ui.unmount()
   })
 }
 
@@ -294,7 +294,6 @@ test('a theme set through the menu recolors the band at once', async ($, on) => 
   expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(FG)
   await $.config.set(SET_LIGHT)
   expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(LIGHT_FG)
-  await ui.unmount()
 })
 
 test('a refused theme keeps the palette', async ($, on) => {
@@ -305,7 +304,6 @@ test('a refused theme keeps the palette', async ($, on) => {
 
   await $.config.set(SET_LIGHT)
   expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(FG)
-  await ui.unmount()
 })
 
 test('a theme changed any other way is picked up by the timer', async ($, on) => {
@@ -318,7 +316,6 @@ test('a theme changed any other way is picked up by the timer', async ($, on) =>
   expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(FG)
   await clock.advance(31 * 1000)
   expect((await ui.find({ type: 'Text', text: /^Opus 5\.5$/ }))?.props.color).toBe(LIGHT_FG)
-  await ui.unmount()
 })
 
 test('session.start reads the usage, the model and the theme', async ($, on) => {
@@ -330,7 +327,6 @@ test('session.start reads the usage, the model and the theme', async ($, on) => 
   for (const text of [/4\.8%/, /^22%$/, /3h00/, /^35%$/, /≈ \$1\.00/]) {
     expect(await ui.find({ type: 'Text', text })).toBeDefined()
   }
-  await ui.unmount()
 })
 
 test('a finished turn records growth, cost and the cache', async ($, on) => {
@@ -344,7 +340,6 @@ test('a finished turn records growth, cost and the cache', async ($, on) => {
   for (const text of [/5\.3%/, /▲ \+5\.3k/, /≈ \$1\.12/, /\+\$0\.12/, /^98%$/, /^60m$/]) {
     expect(await ui.find({ type: 'Text', text })).toBeDefined()
   }
-  await ui.unmount()
 })
 
 test('a subagent turn records nothing', async ($, on) => {
@@ -358,7 +353,6 @@ test('a subagent turn records nothing', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /4\.8%/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /▲/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /cache/ })).toBeUndefined()
-  await ui.unmount()
 })
 
 test('session.measure updates the context and keeps an unreported window', async ($, on) => {
@@ -369,7 +363,6 @@ test('session.measure updates the context and keeps an unreported window', async
 
   expect(await ui.find({ type: 'Text', text: /^71\.5%$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^22%$/ })).toBeDefined()
-  await ui.unmount()
 })
 
 test('turn.step records the effort of the main thread alone', async ($, on) => {
@@ -381,7 +374,6 @@ test('turn.step records the effort of the main thread alone', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /^max$/ })).toBeUndefined()
   await $.turn.step({ ...STEP, effort: 'high' }).next()
   expect(await ui.find({ type: 'Text', text: /^high$/ })).toBeDefined()
-  await ui.unmount()
 })
 
 const TTLS: readonly (readonly [string, Partial<Snapshot>, RegExp])[] = [
@@ -398,7 +390,6 @@ for (const [name, patch, text] of TTLS) {
     const ui = await $.ui.mount(BAND)
 
     expect(await ui.find({ type: 'Text', text })).toBeDefined()
-    await ui.unmount()
   })
 }
 
@@ -413,7 +404,6 @@ test('a snapshot an earlier version stored is declined', async ($, on) => {
 
   expect(await ui.find({ type: 'Text', text: /engine/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Opus/ })).toBeUndefined()
-  await ui.unmount()
 })
 
 for (const source of ['clear', 'resume', 'fork'] as const) {
@@ -434,7 +424,6 @@ for (const source of ['clear', 'resume', 'fork'] as const) {
     for (const text of [/▲/, /\+\$/, /cache/]) {
       expect(await ui.find({ type: 'Text', text })).toBeUndefined()
     }
-    await ui.unmount()
   })
 }
 
@@ -448,7 +437,6 @@ test('a compaction keeps the band', async ($, on) => {
   const ui = await $.ui.mount(BAND)
 
   expect(await ui.find({ type: 'Text', text: /▲ \+5\.3k/ })).toBeDefined()
-  await ui.unmount()
 })
 
 test('a model switch updates the model and the cache at once', async ($, on) => {
@@ -461,7 +449,6 @@ test('a model switch updates the model and the cache at once', async ($, on) => 
   expect(await ui.find({ type: 'Text', text: /^Sonnet 5\.5$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Opus/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^5m$/ })).toBeDefined()
-  await ui.unmount()
 })
 
 test('the timer redraws a band whose cache has lapsed', async ($, on) => {
@@ -473,5 +460,4 @@ test('the timer redraws a band whose cache has lapsed', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /^60m$/ })).toBeDefined()
   await clock.advance(61 * MINUTE)
   expect(await ui.find({ type: 'Text', text: /^expired$/ })).toBeDefined()
-  await ui.unmount()
 })

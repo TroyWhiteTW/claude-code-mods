@@ -12,6 +12,7 @@ type Palette = {
   dim: string
   sep: string
   track: string
+  trackSolid: string
   pace: string
   spark: string
   green: string
@@ -44,6 +45,7 @@ const DARK: Palette = {
   dim: '#80858f',
   sep: '#4b4f59',
   track: '#353943',
+  trackSolid: '#5a5f6a',
   pace: '#8c929d',
   spark: '#7d838e',
   green: '#4fc583',
@@ -66,6 +68,7 @@ const LIGHT: Palette = {
   dim: '#7b8089',
   sep: '#c3c6cc',
   track: '#d3d6db',
+  trackSolid: '#a9aeb6',
   pace: '#8f959e',
   spark: '#a3a8b0',
   green: '#2e9b5d',
@@ -102,7 +105,6 @@ const EMPTY: Snapshot = {
 }
 
 const snapshot = atom({ plugin: 'usage-meter', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-2' })
-const tick = atom({ plugin: 'usage-meter', key: 'tick' } as const, 0)
 
 function readSettings(options: PluginOptions): Settings {
   const layout = options.layout === 'B' ? 'B' : 'A'
@@ -155,11 +157,9 @@ export function modelLabel(raw: string): string {
 
 export function tokenLabel(n: number): string {
   const abs = Math.abs(n)
-  const scaled = abs >= 1000000 ? [n / 1000000, 'M'] : abs >= 1000 ? [n / 1000, 'k'] : [n, '']
-  const value = scaled[0] as number
-  const text = Math.abs(value) >= 100 || scaled[1] === '' ? String(Math.round(value)) : String(Math.round(value * 10) / 10)
+  const short = (value: number) => (Math.abs(value) >= 100 ? Math.round(value) : Math.round(value * 10) / 10)
 
-  return text + scaled[1]
+  return abs >= 1000000 ? `${short(n / 1000000)}M` : abs >= 1000 ? `${short(n / 1000)}k` : String(Math.round(n))
 }
 
 function pad(n: number): string {
@@ -383,7 +383,9 @@ function costPill(s: Snapshot, p: Palette): Pill | null {
 }
 
 function pills(s: Snapshot, settings: Settings, at: number): Pill[] {
-  const p = s.isLight ? LIGHT : DARK
+  const base = s.isLight ? LIGHT : DARK
+  // 版面 B 的底色跟一般的 track 太接近，空格會看不見
+  const p = settings.layout === 'B' ? { ...base, track: base.trackSolid } : base
   const list = [
     modelPill(s, p),
     contextPill(s, p),
@@ -406,7 +408,9 @@ function isLightTheme(theme: ConfigValue | undefined): boolean {
 
 async function syncTheme($: EngineInterface, theme: ConfigValue | undefined): Promise<void> {
   const isLight = isLightTheme(theme)
-  await update($, snapshot, s => (s.isLight === isLight ? s : { ...s, isLight }))
+  if ((await read($, snapshot)).isLight !== isLight) {
+    await update($, snapshot, s => ({ ...s, isLight }))
+  }
 }
 
 async function load($: EngineInterface, base?: Snapshot): Promise<void> {
@@ -430,7 +434,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await load($)
     $.clock.every(30 * 1000, () => {
-      void $.clock.now().then(at => update($, tick, () => at))
+      $.ui.invalidate('ui.render')
       void $.config.list().then(rows => syncTheme($, themeRow(rows)))
     })
 
@@ -470,7 +474,9 @@ export const register: Register = (on, options) => {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined && e.effort !== undefined) {
       const effort = String(e.effort)
-      await update($, snapshot, s => (s.effort === effort ? s : { ...s, effort }))
+      if ((await read($, snapshot)).effort !== effort) {
+        await update($, snapshot, s => ({ ...s, effort }))
+      }
     }
 
     return yield* next(e)
@@ -506,7 +512,6 @@ export const register: Register = (on, options) => {
       return next(e)
     }
     const s = await read($, snapshot)
-    await read($, tick)
     const list = pills(s, settings, await $.clock.now())
     if (list.length === 0) {
       return next(e)
@@ -514,30 +519,19 @@ export const register: Register = (on, options) => {
 
     const { Box, Text } = $.ui.resolve(e)
     const draw = (pill: Pill) => {
-      const bg = settings.layout === 'A' ? pill.colors.fill : pill.colors.solid
-      const content = (
-        <Text>
-          {pill.segs.map(seg => {
-            const style: { color?: string; backgroundColor: string; bold?: boolean } = { backgroundColor: bg }
-            if (seg.color !== undefined) {
-              style.color = seg.color
-            }
-            if (seg.bold === true) {
-              style.bold = true
-            }
+      const isFramed = settings.layout === 'A'
+      const bg = isFramed ? pill.colors.fill : pill.colors.solid
+      const frame = isFramed ? ({ borderStyle: 'round', borderColor: pill.colors.border } as const) : {}
 
-            return <Text {...style}>{seg.text}</Text>
-          })}
-        </Text>
-      )
-
-      return settings.layout === 'A' ? (
-        <Box borderStyle="round" borderColor={pill.colors.border} backgroundColor={bg} paddingX={1}>
-          {content}
-        </Box>
-      ) : (
-        <Box backgroundColor={bg} paddingX={1}>
-          {content}
+      return (
+        <Box {...frame} backgroundColor={bg} paddingX={1}>
+          <Text>
+            {pill.segs.map(seg => (
+              <Text color={seg.color} bold={seg.bold} backgroundColor={bg}>
+                {seg.text}
+              </Text>
+            ))}
+          </Text>
         </Box>
       )
     }

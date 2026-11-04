@@ -22,6 +22,6 @@ export type Snapshot = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'usage-meter': { snapshot: Shaped<Snapshot>; tick: number }
+    'usage-meter': { snapshot: Shaped<Snapshot> }
   }
 }

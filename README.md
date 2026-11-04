@@ -6,9 +6,15 @@ TroyWhiteTW 的 Claude Code mods，為終端機（CLI）設計。
 
 ### [usage-meter](mods/usage-meter)
 
-在提示框上方顯示模型、context、5h／7d 額度、快取與花費。
+在提示框上方顯示模型、context、5h／7d 額度、快取與花費。有兩種版面，輸入 `/config` 切換。
 
-![usage-meter](mods/usage-meter/assets/layout-a.svg)
+版面 A（預設）：圓角框，每排占 3 列。
+
+![usage-meter 版面 A](mods/usage-meter/assets/layout-a-wide.svg)
+
+版面 B：底色塊，每排占 1 列。
+
+![usage-meter 版面 B](mods/usage-meter/assets/layout-b-wide.svg)
 
 ## 安裝
 
